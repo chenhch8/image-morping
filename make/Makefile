@@ -14,4 +14,4 @@ Delaunay.o : ../source/Delaunay.cpp ../source/Delaunay.h
 # Test.o : ../source/Test.cpp ../source/Test.h ../source/Morphing.h ../source/CImg.h
 # 	$(CC) -c ../source/Test.cpp
 clean :
-	rm -rf $(MAIN)
+	rm -rf $(MAIN) Run

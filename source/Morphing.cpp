@@ -193,8 +193,8 @@ void Morphing::calcTargetImgHelper(vector<vector<int>> &tran, vector<CImg<float>
 		this->midImg(x, y, 2) = this->srcImg(U_0(0, 0), U_0(0, 1), 2) * (1 - factor) + \
 						  this->disImg(U_1(0, 0), U_1(0, 1), 2) * factor;
 	}
-	// this->midImg.display("this->midImg");
 	cout << "\t计算完成!" << endl;
+	this->midImg.display("this->midImg");
 }
 
 /* 重心法 判断点是否在三角形内 */
