@@ -1,6 +1,6 @@
 <h1 style="text-align: center;">《计算机视觉与模式识别》第五次作业——人脸渐变</h1>
 
-<h4 style="text-align: right;">14331015 陈海城</h4>
+<h4 style="text-align: right;">chenhch8</h4>
 
 ### 文件结构说明
 ```
