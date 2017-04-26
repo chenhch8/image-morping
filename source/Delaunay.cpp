@@ -85,5 +85,5 @@ void delaunay(int cols, int rows, vector<Point> &srcPoints, vector<vector<int>> 
 	// [3] 找出三角行的三个顶点原先的下标
 	indexMap(triangles, srcPoints, result);
 
-	debug(triangles, srcPoints, result);
+	// debug(triangles, srcPoints, result);
 }

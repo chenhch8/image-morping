@@ -63,6 +63,7 @@ void Morphing::init(string &srcImg, string &disImg, string &srcPoints, string &d
 	}
 	this->srcImg.load(srcImg.c_str());
 	this->disImg.load(disImg.c_str());
+	this->midImg = this->disImg;
 	this->times = times;
 }
 
@@ -85,7 +86,7 @@ void Morphing::calcTargetImg(vector<vector<int>> &tran, int &times) {
 
 	int index = 0, x, y, i, j;
 	// [1] 计算中间特征点——形状变形
-	for (i = 0; i <= times; ++i) {
+	for (i = 1; i <= times; ++i) {
 		points.clear();
 		factor = i / double(times);
 		for (j = 0; j < this->disPoints.size(); ++j) {
@@ -97,21 +98,37 @@ void Morphing::calcTargetImg(vector<vector<int>> &tran, int &times) {
 		pointsList.push_back(points);
 	}
 	// [2] 计算中间仿射变换矩阵
-	vector<CImg<float>> matrixs; // 仿射变换矩阵
+	//   仿射变换矩阵: matrixs[0]-起始图到中间图的变换矩阵
+	//               matrixs[1]-目标图到中间图的变换矩阵
+	vector<CImg<float>> matrixs[2];
 	for (i = 0; i < times; ++i) {
-		matrixs.clear();
+		cout << "#Frame: " << i << endl;
+		matrixs[0].clear(); matrixs[1].clear();
 		// [2.1] 计算仿射变换矩阵
-		calcMatrixs(tran, matrixs, pointsList[i], pointsList[i + 1]);
-		// [2.2] 图形变换
-		calcTargetImgHelper(tran, matrixs, pointsList[i + 1], factors[i]);
+		calcMatrixs(tran, matrixs, pointsList[i]);
+		// [2.2] 中间图像生成
+		calcTargetImgHelper(tran, matrixs, pointsList[i], factors[i]);
+		// [2.3] 保存中间图像
+		saveImg(i);
 		// // 测试
 		// test(*this, tran, pointsList[i + 1]);
 	}
 }
 
 // M*ABC=abc -> M=abc/ABC
-void Morphing::calcMatrixs(vector<vector<int>> &tran, vector<CImg<float>> &matrixs,
-						   vector<Point> &sourcePoints, vector<Point> &goalPoints) {
+void Morphing::calcMatrixs(vector<vector<int>> &tran, vector<CImg<float>> *matrixs,
+						   vector<Point> &midPoints) {
+	cout << "\t计算仿射变换矩阵..." << endl;
+	// 计算从起始图到中间图的矩阵
+	calcMatrixHelper(tran, matrixs[0], this->srcPoints, midPoints);
+	// 计算从目标图到中间图的矩阵
+	calcMatrixHelper(tran, matrixs[1], this->disPoints, midPoints);
+	cout << "\t计算完成!" << endl;
+	return;
+}
+
+void Morphing::calcMatrixHelper(vector<vector<int>> &tran, vector<CImg<float>> &matrix,
+								vector<Point> &sourcePoints, vector<Point> &goalPoints) {
 	CImg<float> ABC(3, 3, 1, 1, 0); // 起始三角形矩阵
 	CImg<float> abc(3, 3, 1, 1, 0); // 终止三角形矩阵
 	// 对每个三角形计算其变换矩阵
@@ -128,20 +145,21 @@ void Morphing::calcMatrixs(vector<vector<int>> &tran, vector<CImg<float>> &matri
 			abc(col, 2) = 1;
 		}
 		// 计算 M 并保存到 matrixs 中
-		matrixs.push_back(abc / ABC);
+		matrix.push_back(abc / ABC);
 	}
 	return;
 }
 
-void Morphing::calcTargetImgHelper(vector<vector<int>> &tran, vector<CImg<float>> &matrixs,
-								   vector<Point> &goalPoints, double factor) {
-	CImg<float> result(this->disImg.width(), this->disImg.height(), 1, 3, 0); // 目标图片
-	CImg<char> where(this->disImg.width(), this->disImg.height(), 1, 1, 0);   // 保存像素点(x,y)在哪个三角形中
+void Morphing::calcTargetImgHelper(vector<vector<int>> &tran, vector<CImg<float>> *matrixs,
+								   vector<Point> &midPoints, double factor) {
+	cout << "\t计算中间图像..." << endl;
+	// 保存像素点(x,y)在哪个三角形中
+	CImg<char> where(this->disImg.width(), this->disImg.height(), 1, 1, 0);
 	int x, y, i;
 	// 找出所有像素点所属哪个三角形
 	cimg_forXY(this->disImg, x, y) {
 		for (i = 0; i < tran.size(); ++i) {
-			if (isInTriangle(tran[i], goalPoints, y, x)) {
+			if (isInTriangle(tran[i], midPoints, y, x)) {
 				where(x, y) = i;
 				break;
 			} else if (i == tran.size() - 1) {
@@ -150,37 +168,45 @@ void Morphing::calcTargetImgHelper(vector<vector<int>> &tran, vector<CImg<float>
 		}
 	}
 	// 计算目标图
-	CImg<float> X(1, 3, 1, 1, 0), // 目标图上的点
-				U(1, 3, 1, 1, 0); // 目标图投影到起始图上的点
+	CImg<float> X(1, 3, 1, 1, 0),   // 目标图上的点
+				U_0(1, 3, 1, 1, 0), // 中间图投影到起始图上的点
+				U_1(1, 3, 1, 1, 0); // 中间图投影到目标图上的点
 	cimg_forXY(this->disImg, x, y) {
 		X(0, 0) = x; X(0, 1) = y; X(0, 2) = 1;
 		if ((int)where(x, y) != -1) {
-			U = matrixs[(int)where(x, y)] * X;
-			U(0, 0) /= U(0, 2);
-			U(0, 1) /= U(0, 2);
+			U_0 = matrixs[0][(int)where(x, y)] * X;
+			U_1 = matrixs[1][(int)where(x, y)] * X;
+			U_0(0, 0) /= U_0(0, 2); U_0(0, 1) /= U_0(0, 2);
+			U_1(0, 0) /= U_1(0, 2); U_1(0, 1) /= U_1(0, 2);
 		} else {
-			U(0, 0) = x; U(0, 1) = y;
+			U_0(0, 0) = x; U_0(0, 1) = y;
+			U_1(0, 0) = x; U_1(0, 1) = y;
 		}
-		U(0, 0) = U(0, 0) < 0 ? 0 : U(0, 0);
-		U(0, 1) = U(0, 1) < 0 ? 0 : U(0, 1);
-		result(x, y, 0) = this->srcImg(U(0, 0), U(0, 1), 0) * (1 - factor) + this->disImg(x, y, 0) * factor;
-		result(x, y, 1) = this->srcImg(U(0, 0), U(0, 1), 1) * (1 - factor) + this->disImg(x, y, 1) * factor;
-		result(x, y, 2) = this->srcImg(U(0, 0), U(0, 1), 2) * (1 - factor) + this->disImg(x, y, 2) * factor;
+		// 保证点在图像内
+		U_0(0, 0) = U_0(0, 0) < 0 ? 0 : U_0(0, 0); U_0(0, 1) = U_0(0, 1) < 0 ? 0 : U_0(0, 1);
+		U_1(0, 0) = U_1(0, 0) < 0 ? 0 : U_1(0, 0); U_1(0, 1) = U_1(0, 1) < 0 ? 0 : U_1(0, 1);
+		// 计算像素值
+		this->midImg(x, y, 0) = this->srcImg(U_0(0, 0), U_0(0, 1), 0) * (1 - factor) + \
+						  this->disImg(U_1(0, 0), U_1(0, 1), 0) * factor;
+		this->midImg(x, y, 1) = this->srcImg(U_0(0, 0), U_0(0, 1), 1) * (1 - factor) + \
+						  this->disImg(U_1(0, 0), U_1(0, 1), 1) * factor;
+		this->midImg(x, y, 2) = this->srcImg(U_0(0, 0), U_0(0, 1), 2) * (1 - factor) + \
+						  this->disImg(U_1(0, 0), U_1(0, 1), 2) * factor;
 	}
-	result.display("result");
-	this->srcImg = result;
+	// this->midImg.display("this->midImg");
+	cout << "\t计算完成!" << endl;
 }
 
 /* 重心法 判断点是否在三角形内 */
-bool Morphing::isInTriangle(vector<int> &ABC, vector<Point> &goalPoints, int &row, int &col) {
-	int v0_x = goalPoints[ABC[1]].x - goalPoints[ABC[0]].x,
-		v0_y = goalPoints[ABC[1]].y - goalPoints[ABC[0]].y,
+bool Morphing::isInTriangle(vector<int> &ABC, vector<Point> &points, int &row, int &col) {
+	int v0_x = points[ABC[1]].x - points[ABC[0]].x,
+		v0_y = points[ABC[1]].y - points[ABC[0]].y,
 		
-		v1_x = goalPoints[ABC[2]].x - goalPoints[ABC[0]].x,
-		v1_y = goalPoints[ABC[2]].y - goalPoints[ABC[0]].y,
+		v1_x = points[ABC[2]].x - points[ABC[0]].x,
+		v1_y = points[ABC[2]].y - points[ABC[0]].y,
 		
-		v2_x = col - goalPoints[ABC[0]].x,
-		v2_y = row - goalPoints[ABC[0]].y;
+		v2_x = col - points[ABC[0]].x,
+		v2_y = row - points[ABC[0]].y;
 
 	int s12 = v1_x * v2_x + v1_y * v2_y,
 		s00 = v0_x * v0_x + v0_y * v0_y,
@@ -195,4 +221,15 @@ bool Morphing::isInTriangle(vector<int> &ABC, vector<Point> &goalPoints, int &ro
 
 	if (x < 0 || y < 0 || x > 1 || y > 1) return false;
 	return x + y <= 1;
+}
+
+void Morphing::saveImg(int &i) {
+	cout << "\t保存中间图像..." << endl;
+	// int -> string
+	stringstream str;  
+    str << i;
+    // save
+    string name = "../output/" + str.str() + ".bmp";
+    this->midImg.save(name.c_str());
+    cout << "\t" << name << " 保存完成!" << endl;
 }
